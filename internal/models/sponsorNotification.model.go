@@ -8,7 +8,7 @@ import (
 
 // SponsorNotification represents the sponsor notification model
 type SponsorNotification struct {
-	ID             uint           `gorm:"primaryKey" json:"id"`
+	ID             uint           `gorm:"primaryKey" json:"id,string"`
 	SponsorID      uint           `gorm:"not null" json:"sponsorId"`
 	Sponsor        Sponsor        `gorm:"foreignKey:SponsorID" json:"sponsor,omitempty"`
 	Title          string         `gorm:"not null" json:"title"`
