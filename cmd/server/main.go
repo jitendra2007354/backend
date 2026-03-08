@@ -123,16 +123,17 @@ func main() {
 
 	// --- Protected Sponsor Routes ---
 	mux.Handle("GET /api/sponsor/history", middleware.ProtectSponsor(http.HandlerFunc(controllers.GetSponsorHistory)))
+	mux.Handle("GET /api/sponsor/notifications", middleware.ProtectSponsor(http.HandlerFunc(controllers.GetSponsorHistory)))
 	mux.Handle("POST /api/sponsor/notifications", middleware.ProtectSponsor(http.HandlerFunc(controllers.SendSponsorNotification)))
 	mux.Handle("DELETE /api/sponsor/notifications/{id}", middleware.ProtectSponsor(http.HandlerFunc(controllers.DeleteSponsorNotification)))
 	mux.Handle("POST /api/sponsor/upload-banner", middleware.ProtectSponsor(http.HandlerFunc(controllers.UploadCampaignBanner)))
 	mux.HandleFunc("GET /api/sponsor/gam-token", controllers.GetGamToken) // Mocked
 	
 	// Sponsor System Notifications
-	mux.Handle("GET /api/sponsor/system-notifications", middleware.ProtectSponsor(http.HandlerFunc(controllers.GetSystemNotifications)))
-	mux.Handle("POST /api/sponsor/system-notifications/{id}/read", middleware.ProtectSponsor(http.HandlerFunc(controllers.MarkSystemNotificationRead)))
-	mux.Handle("POST /api/sponsor/system-notifications/read-all", middleware.ProtectSponsor(http.HandlerFunc(controllers.MarkAllSystemNotificationsRead)))
-	mux.Handle("POST /api/sponsor/system-notifications/{id}/like", middleware.ProtectSponsor(http.HandlerFunc(controllers.ToggleSystemNotificationLike)))
+	mux.Handle("GET /api/sponsor/notifications/system", middleware.ProtectSponsor(http.HandlerFunc(controllers.GetSystemNotifications)))
+	mux.Handle("POST /api/sponsor/notifications/{id}/read", middleware.ProtectSponsor(http.HandlerFunc(controllers.MarkSystemNotificationRead)))
+	mux.Handle("POST /api/sponsor/notifications/read-all", middleware.ProtectSponsor(http.HandlerFunc(controllers.MarkAllSystemNotificationsRead)))
+	mux.Handle("POST /api/sponsor/notifications/{id}/like", middleware.ProtectSponsor(http.HandlerFunc(controllers.ToggleSystemNotificationLike)))
 
 	// --- Admin Routes (Should be protected by Admin Middleware in production) ---
 	mux.HandleFunc("POST /api/admin/ai-chat", controllers.GetAIAssistantResponse)
