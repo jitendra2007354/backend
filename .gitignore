@@ -5,3 +5,4 @@ package.json
 package-lock.json
 main.exe
 .vscode
+node_modules
