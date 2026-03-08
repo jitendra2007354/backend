@@ -28,10 +28,10 @@ func SponsorLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	secret := os.Getenv("JWT_SECRET")
+	secret := os.Getenv("JWT_SPONSOR_SECRET")
 	if secret == "" {
-		fmt.Println("⚠️ WARNING: JWT_SECRET is not set! Using insecure default.")
-		secret = "default_secret_key_change_me"
+		fmt.Println("⚠️ WARNING: JWT_SPONSOR_SECRET is not set! Using an insecure default key. Please set this in your environment for production.")
+		secret = "default_insecure_sponsor_secret_key"
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
