@@ -23,12 +23,8 @@ func InitScheduler() {
 				n.DriverCount = counts.DriverCount
 				n.CustomerCount = counts.CustomerCount
 				n.Status = "sent"
+				n.SentAt = time.Now()
 				DB.Save(&n)
-				var sponsor models.Sponsor
-				if err := DB.First(&sponsor, n.SponsorID).Error; err == nil {
-					sponsor.RemainingLimit -= 1
-					DB.Save(&sponsor)
-				}
 			}
 		}
 	}()

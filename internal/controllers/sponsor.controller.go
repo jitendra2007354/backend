@@ -78,17 +78,40 @@ func SendSponsorNotification(w http.ResponseWriter, r *http.Request) {
 	title := r.FormValue("title")
 	message := r.FormValue("message")
 	target := r.FormValue("target")
+	scheduledForStr := r.FormValue("scheduledFor")
+
+	var scheduledFor *time.Time
+	status := "sending"
+
+	if scheduledForStr != "" {
+		if t, err := time.Parse(time.RFC3339, scheduledForStr); err == nil && t.After(time.Now()) {
+			scheduledFor = &t
+			status = "scheduled"
+		}
+	}
 
 	// Logic to save notification and broadcast
 	notification := models.SponsorNotification{
-		SponsorID: sponsor.ID,
-		Title:     title,
-		Message:   message,
-		Target:    target,
-		Status:    "sending",
-		SentAt:    time.Now(),
+		SponsorID:    sponsor.ID,
+		Title:        title,
+		Message:      message,
+		Target:       target,
+		Status:       status,
+		SentAt:       time.Now(),
+		ScheduledFor: scheduledFor,
 	}
 	database.DB.Create(&notification)
+
+	sponsor.RemainingLimit -= 1
+	database.DB.Save(sponsor)
+
+	if status == "scheduled" {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"notification":   notification,
+			"remainingLimit": sponsor.RemainingLimit,
+		})
+		return
+	}
 
 	// Broadcast logic (mocked service call)
 	counts, _ := services.BroadcastSponsorNotification(target, title, message, notification.ID)
@@ -98,9 +121,6 @@ func SendSponsorNotification(w http.ResponseWriter, r *http.Request) {
 	notification.CustomerCount = counts.CustomerCount
 	notification.Status = "sent"
 	database.DB.Save(&notification)
-
-	sponsor.RemainingLimit -= 1
-	database.DB.Save(sponsor)
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"notification":   notification,
