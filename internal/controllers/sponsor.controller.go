@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"encoding/json"	
+	"fmt"
 	"net/http"
 	"os"
 	"spark/internal/database"
@@ -27,13 +28,25 @@ func SponsorLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	secret := os.Getenv("JWT_SECRET")
+	if secret == "" {
+		fmt.Println("⚠️ WARNING: JWT_SECRET is not set! Using insecure default.")
+		secret = "default_secret_key_change_me"
+	}
+
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"id":       sponsor.ID,
 		"username": sponsor.Username,
 		"role":     sponsor.Role,
 		"exp":      time.Now().Add(24 * time.Hour).Unix(),
 	})
-	tokenString, _ := token.SignedString([]byte(os.Getenv("JWT_SPONSOR_SECRET")))
+	tokenString, err := token.SignedString([]byte(secret))
+	if err != nil {
+		http.Error(w, "Failed to generate token", http.StatusInternalServerError)
+		return
+	}
+
+	fmt.Printf("✅ Sponsor Logged In: %s (ID: %d)\n", sponsor.Username, sponsor.ID)
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"token":          tokenString,
