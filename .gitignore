@@ -1,1 +1,7 @@
 .env
+docker-compose.yml
+Dockerfile
+package.json
+package-lock.json
+main.exe
+.vscode
