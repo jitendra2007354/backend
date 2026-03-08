@@ -126,8 +126,8 @@ func main() {
 	mux.Handle("GET /api/sponsor/notifications", middleware.ProtectSponsor(http.HandlerFunc(controllers.GetSponsorHistory)))
 	mux.Handle("POST /api/sponsor/notifications", middleware.ProtectSponsor(http.HandlerFunc(controllers.SendSponsorNotification)))
 	mux.Handle("DELETE /api/sponsor/notifications/{id}", middleware.ProtectSponsor(http.HandlerFunc(controllers.DeleteSponsorNotification)))
-	mux.Handle("POST /api/sponsor/upload-banner", middleware.ProtectSponsor(http.HandlerFunc(controllers.UploadCampaignBanner)))
-	mux.HandleFunc("GET /api/sponsor/gam-token", controllers.GetGamToken) // Mocked
+	mux.Handle("POST /api/sponsor/campaign/banner", middleware.ProtectSponsor(http.HandlerFunc(controllers.UploadCampaignBanner)))
+	mux.Handle("GET /api/sponsor/gam/token", middleware.ProtectSponsor(http.HandlerFunc(controllers.GetGamToken)))
 	
 	// Sponsor System Notifications
 	mux.Handle("GET /api/sponsor/notifications/system", middleware.ProtectSponsor(http.HandlerFunc(controllers.GetSystemNotifications)))
