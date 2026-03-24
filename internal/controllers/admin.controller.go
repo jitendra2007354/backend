@@ -9,11 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/generative-ai-go/genai"
-	"google.golang.org/api/option"
 	"spark/internal/database"
 	"spark/internal/models"
 	"spark/internal/services"
+
+	"github.com/google/generative-ai-go/genai"
+	"google.golang.org/api/option"
 )
 
 // --- AI ASSISTANT --- //
@@ -52,7 +53,7 @@ func GetAIAssistantResponse(w http.ResponseWriter, r *http.Request) {
 	}
 	defer client.Close()
 
-	model := client.GenerativeModel("gemini-1.5-flash")
+	model := client.GenerativeModel("gemini-1.0-pro")
 
 	// Simplify user data for context
 	simplifiedData := make([]map[string]interface{}, 0)
@@ -82,11 +83,11 @@ func GetAIAssistantResponse(w http.ResponseWriter, r *http.Request) {
 		{
 		"text": "Your conversational response here.",
 		"action": {
-			"type": "BLOCK_USERS" | "UNBLOCK_USERS" | "GENERATE_CHART" | "NAVIGATE" | "UPDATE_PRICING" | "NONE",
+			"type": "BLOCK_USERS" | "UNBLOCK_USERS" | "GENERATE_CHART" | "NAVIGATE" | "UPDATE_CONFIG" | "NONE",
 			"targetIds": ["id1", "id2"],
 			"page": "Analytics" | "Drivers",
 			"chartData": { ... },
-			"pricingData": { ... }
+			"configData": { "platformFee": 50, "gstPercentage": 18, "maxBidPerKm": 20, "cancellationFee": 0 }
 		}
 		}
 		Current Date: %s
@@ -126,12 +127,14 @@ func GetAIAssistantResponse(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := cs.SendMessage(ctx, parts...)
 	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"text": "Error processing request: %v", "action": {"type": "NONE"}}`, err), http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(fmt.Sprintf(`{"text": "Error processing request: %v", "action": {"type": "NONE"}}`, err)))
 		return
 	}
 
 	if len(resp.Candidates) == 0 || len(resp.Candidates[0].Content.Parts) == 0 {
-		http.Error(w, "Empty response from AI", http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"text": "Empty response from AI", "action": {"type": "NONE"}}`))
 		return
 	}
 
@@ -150,40 +153,9 @@ func GetAIAssistantResponse(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func AddPricingRule(w http.ResponseWriter, r *http.Request) {
-	ruleType := r.PathValue("type")
-	var rule models.PricingRule
-	if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
-		http.Error(w, "Invalid body", http.StatusBadRequest)
-		return
-	}
-	rule.Category = ruleType
-
-	if err := database.DB.Create(&rule).Error; err != nil {
-		http.Error(w, "Failed to add pricing rule", http.StatusInternalServerError)
-		return
-	}
-	json.NewEncoder(w).Encode(map[string]interface{}{"message": "Rule added", "rule": rule})
-}
-
-func DeletePricingRule(w http.ResponseWriter, r *http.Request) {
-	ruleType := r.PathValue("type")
-	id := r.PathValue("id")
-
-	result := database.DB.Where("id = ? AND category = ?", id, ruleType).Delete(&models.PricingRule{})
-	if result.Error != nil {
-		http.Error(w, "Failed to delete rule", http.StatusInternalServerError)
-		return
-	}
-	if result.RowsAffected == 0 {
-		http.Error(w, "Rule not found", http.StatusNotFound)
-		return
-	}
-	json.NewEncoder(w).Encode(map[string]string{"message": "Rule deleted successfully"})
-}
-
 func SendNotification(w http.ResponseWriter, r *http.Request) {
 	var req struct {
+		Target  string `json:"target"`
 		Title   string `json:"title"`
 		Message string `json:"message"`
 	}
@@ -192,7 +164,19 @@ func SendNotification(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := services.SendAdminNotification("all", req.Title, req.Message); err != nil {
+	target := req.Target
+	lowerTarget := strings.ToLower(target)
+	if lowerTarget == "" || lowerTarget == "all" {
+		target = "all"
+	} else if lowerTarget == "customer" {
+		target = "Customer"
+	} else if lowerTarget == "driver" {
+		target = "Driver"
+	} else if lowerTarget == "campowner" {
+		target = "CampOwner"
+	}
+
+	if err := services.SendAdminNotification(target, req.Title, req.Message); err != nil {
 		http.Error(w, "Failed to send notification", http.StatusInternalServerError)
 		return
 	}
@@ -220,23 +204,65 @@ func GetAllUsers(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to fetch users", http.StatusInternalServerError)
 		return
 	}
-	// Simplified stats logic for brevity, assuming standard GORM preloading or separate queries
-	// In a real migration, you'd implement the aggregation logic here using DB.Table("rides").Select(...)
-	json.NewEncoder(w).Encode(users)
-}
 
-func GetPricing(w http.ResponseWriter, r *http.Request) {
-	var rules []models.PricingRule
-	if err := database.DB.Find(&rules).Error; err != nil {
-		http.Error(w, "Failed to fetch pricing", http.StatusInternalServerError)
-		return
+	var rawUsers []map[string]interface{}
+	userBytes, _ := json.Marshal(users)
+	json.Unmarshal(userBytes, &rawUsers)
+
+	for i, u := range rawUsers {
+		// Map userType to role
+		var roleStr string
+		if uType, ok := u["userType"].(string); ok {
+			roleStr = uType
+		} else if uType, ok := u["UserType"].(string); ok {
+			roleStr = uType
+		}
+
+		if strings.EqualFold(roleStr, "driver") {
+			rawUsers[i]["role"] = "Driver"
+		} else if strings.EqualFold(roleStr, "customer") {
+			rawUsers[i]["role"] = "Customer"
+		} else if strings.EqualFold(roleStr, "campowner") {
+			rawUsers[i]["role"] = "CampOwner"
+		} else {
+			rawUsers[i]["role"] = roleStr
+		}
+
+		// Map firstName and lastName to name
+		fName, _ := u["firstName"].(string)
+		lName, _ := u["lastName"].(string)
+		if fName == "" && u["FirstName"] != nil {
+			fName, _ = u["FirstName"].(string)
+			lName, _ = u["LastName"].(string)
+		}
+		name := fName
+		if lName != "" {
+			name += " " + lName
+		}
+		rawUsers[i]["name"] = name
+
+		// Map phoneNumber to mobile
+		if phone, ok := u["phoneNumber"]; ok {
+			rawUsers[i]["mobile"] = phone
+		} else if phone, ok := u["PhoneNumber"]; ok {
+			rawUsers[i]["mobile"] = phone
+		}
+
+		// Set default status if missing
+		isBlocked := false
+		if b, ok := u["isBlocked"].(bool); ok {
+			isBlocked = b
+		} else if b, ok := u["IsBlocked"].(bool); ok {
+			isBlocked = b
+		}
+		if isBlocked {
+			rawUsers[i]["status"] = "Blocked"
+		} else {
+			rawUsers[i]["status"] = "Active"
+		}
 	}
-	// Group by category
-	pricing := make(map[string][]models.PricingRule)
-	for _, rule := range rules {
-		pricing[rule.Category] = append(pricing[rule.Category], rule)
-	}
-	json.NewEncoder(w).Encode(pricing)
+
+	json.NewEncoder(w).Encode(rawUsers)
 }
 
 func GetTickets(w http.ResponseWriter, r *http.Request) {
@@ -249,12 +275,89 @@ func GetTickets(w http.ResponseWriter, r *http.Request) {
 }
 
 func GetDriverLocations(w http.ResponseWriter, r *http.Request) {
-	var locations []models.DriverLocation
-	if err := database.DB.Preload("Driver").Find(&locations).Error; err != nil {
-		http.Error(w, "Failed to fetch locations", http.StatusInternalServerError)
+	type DriverLoc struct {
+		UserID    uint    `json:"id"`
+		Latitude  float64 `json:"lat"`
+		Longitude float64 `json:"lng"`
+	}
+
+	var results []DriverLoc
+	err := database.DB.Table("driver_locations").
+		Select("drivers.user_id as user_id, driver_locations.latitude as latitude, driver_locations.longitude as longitude").
+		Joins("left join drivers on drivers.id = driver_locations.driver_id").
+		Scan(&results).Error
+
+	if err != nil || len(results) == 0 {
+		var locations []models.DriverLocation
+		database.DB.Preload("Driver").Find(&locations)
+
+		var fallbackResults []map[string]interface{}
+		for _, loc := range locations {
+			locBytes, _ := json.Marshal(loc)
+			var locMap map[string]interface{}
+			json.Unmarshal(locBytes, &locMap)
+
+			lat := locMap["lat"]
+			if lat == nil {
+				lat = locMap["latitude"]
+			}
+			if lat == nil {
+				lat = locMap["Latitude"]
+			}
+
+			lng := locMap["lng"]
+			if lng == nil {
+				lng = locMap["longitude"]
+			}
+			if lng == nil {
+				lng = locMap["Longitude"]
+			}
+
+			var userId interface{}
+			if driver, ok := locMap["Driver"].(map[string]interface{}); ok && driver != nil {
+				userId = driver["userId"]
+				if userId == nil {
+					userId = driver["UserID"]
+				}
+				if userId == nil {
+					userId = driver["user_id"]
+				}
+			}
+			if userId == nil {
+				userId = locMap["userId"]
+			}
+			if userId == nil {
+				userId = locMap["UserID"]
+			}
+			if userId == nil {
+				userId = locMap["user_id"]
+			}
+			if userId == nil {
+				userId = locMap["driverId"]
+			}
+			if userId == nil {
+				userId = locMap["DriverID"]
+			}
+			if userId == nil {
+				userId = locMap["id"]
+			}
+
+			if lat != nil && lng != nil && userId != nil {
+				fallbackResults = append(fallbackResults, map[string]interface{}{
+					"id":  fmt.Sprint(userId),
+					"lat": lat,
+					"lng": lng,
+				})
+			}
+		}
+		if fallbackResults == nil {
+			fallbackResults = []map[string]interface{}{}
+		}
+		json.NewEncoder(w).Encode(fallbackResults)
 		return
 	}
-	json.NewEncoder(w).Encode(locations)
+
+	json.NewEncoder(w).Encode(results)
 }
 
 func GetNotificationHistory(w http.ResponseWriter, r *http.Request) {
@@ -267,20 +370,71 @@ func GetNotificationHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 func GetSystemConfig(w http.ResponseWriter, r *http.Request) {
-	var config models.Config
-	if err := database.DB.First(&config).Error; err != nil {
-		json.NewEncoder(w).Encode(map[string]interface{}{})
+	var config map[string]interface{}
+	if err := database.DB.Model(&models.Config{}).First(&config).Error; err != nil {
+		// If no config is in the DB, return a default-filled object
+		// to prevent frontends from crashing or showing all zeros.
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"platform_fee":          50.0,
+			"gst_percentage":        18.0,
+			"base_fare":             50.0,
+			"base_fare_bike":        25.0,
+			"base_fare_auto":        35.0,
+			"base_fare_car":         50.0,
+			"base_fare_suv":         65.0,
+			"base_fare_luxury":      100.0,
+			"max_bid_per_km":        30.0,
+			"min_bid_per_km":        8.0,
+			"min_bid_per_km_bike":   4.8,
+			"min_bid_per_km_auto":   6.4,
+			"min_bid_per_km_car":    8.0,
+			"min_bid_per_km_suv":    9.6,
+			"min_bid_per_km_luxury": 14.4,
+			"cancellation_fee":      0.0,
+			"driver_search_radius":  5.0,
+			"ride_accept_time":      60.0,
+			"wallet_min_balance":    100.0,
+		})
 		return
 	}
+
+	// Ensure raw byte arrays from DB drivers are converted to readable strings
+	for k, v := range config {
+		if b, ok := v.([]byte); ok {
+			config[k] = string(b)
+		}
+	}
+
 	json.NewEncoder(w).Encode(config)
 }
 
 func UpdateSystemConfig(w http.ResponseWriter, r *http.Request) {
 	var updates map[string]interface{}
+
 	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
 		http.Error(w, "Invalid body", http.StatusBadRequest)
 		return
 	}
+
+	// Convert camelCase keys to snake_case for database columns
+	snakeUpdates := make(map[string]interface{})
+	for k, v := range updates {
+		var snake strings.Builder
+		for i, c := range k {
+			if i > 0 && c >= 'A' && c <= 'Z' {
+				snake.WriteRune('_')
+			}
+			snake.WriteRune(c)
+		}
+		snakeUpdates[strings.ToLower(snake.String())] = v
+	}
+
+	var config models.Config
+	if err := database.DB.First(&config).Error; err != nil {
+		database.DB.Create(&config) // Create an initial row if the table is currently empty
+	}
+	database.DB.Model(&config).Updates(snakeUpdates) // Safely updates specific fields matching snake_case db columns
+
 	if err := services.SetConfig(updates); err != nil {
 		http.Error(w, "Failed to update config", http.StatusInternalServerError)
 		return
@@ -299,7 +453,19 @@ func CreateRealtimeNotificationHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := services.SendAdminNotification(req.Target, req.Title, req.Message); err != nil {
+	target := req.Target
+	lowerTarget := strings.ToLower(target)
+	if lowerTarget == "" || lowerTarget == "all" {
+		target = "all"
+	} else if lowerTarget == "customer" {
+		target = "Customer"
+	} else if lowerTarget == "driver" {
+		target = "Driver"
+	} else if lowerTarget == "campowner" {
+		target = "CampOwner"
+	}
+
+	if err := services.SendAdminNotification(target, req.Title, req.Message); err != nil {
 		http.Error(w, "Failed to dispatch notification", http.StatusInternalServerError)
 		return
 	}

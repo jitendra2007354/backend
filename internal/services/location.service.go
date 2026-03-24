@@ -1,7 +1,7 @@
 package services
 
 import (
-	"fmt"
+	"log"
 	"spark/internal/models"
 )
 
@@ -21,19 +21,72 @@ func UpdateDriverLocation(driverID uint, lat, lng float64, shouldPersist bool) {
 
 func FindNearbyAvailableDrivers(lat, lng float64, vehicleType string, city string) ([]models.Driver, error) {
 	var drivers []models.Driver
-	// Using raw SQL for spatial query as GORM doesn't support ST_Distance_Sphere natively without plugins
-	// This assumes MySQL 5.7+ or MariaDB
-	err := DB.Raw(`
-		SELECT d.* 
-		FROM drivers d
-		JOIN driver_locations dl ON d.id = dl.driver_id
-		JOIN users u ON d.user_id = u.id
-		WHERE d.vehicle_type = ? 
-		AND u.is_online = true 
-		AND u.is_blocked = false
-		AND ST_Distance_Sphere(POINT(dl.lng, dl.lat), ST_GeomFromText(?)) <= 5000
-	`, vehicleType, fmt.Sprintf("POINT(%f %f)", lng, lat)).Scan(&drivers).Error
-	return drivers, err
+
+	// Normalize vehicle types to match between customer and driver apps
+	if vehicleType == "4 Seater" || vehicleType == "Car" {
+		vehicleType = "Car 4-Seater"
+	} else if vehicleType == "6 Seater" {
+		vehicleType = "Car 7-Seater"
+	}
+
+	var err error
+	if vehicleType == "" {
+		err = DB.Raw(`
+			SELECT d.* 
+			FROM drivers d
+			JOIN driver_locations dl ON d.id = dl.driver_id
+			JOIN users u ON d.user_id = u.id
+			WHERE u.is_online = true 
+			AND u.is_blocked = false
+			AND (6371 * acos(cos(radians(?)) * cos(radians(dl.lat)) * cos(radians(dl.lng) - radians(?)) + sin(radians(?)) * sin(radians(dl.lat)))) <= 5
+		`, lat, lng, lat).Scan(&drivers).Error
+
+		if err != nil {
+			log.Printf("[Location] haversine query failed, falling back to simple query: %v", err)
+			err = DB.Raw(`
+				SELECT d.*
+				FROM drivers d
+				JOIN driver_locations dl ON d.id = dl.driver_id
+				JOIN users u ON d.user_id = u.id
+				WHERE u.is_online = true
+				AND u.is_blocked = false
+			`).Scan(&drivers).Error
+		}
+	} else {
+		searchType := "%\"" + vehicleType + "\"%"
+
+		// Using Haversine formula for distance in km (6371 is Earth radius in km). <= 5 means within 5km.
+		// This mathematical approach is highly compatible and avoids missing spatial FUNCTION errors.
+		err = DB.Raw(`
+			SELECT d.* 
+			FROM drivers d
+			JOIN driver_locations dl ON d.id = dl.driver_id
+			JOIN users u ON d.user_id = u.id
+			WHERE (u.active_vehicle_types LIKE ? OR ((u.active_vehicle_types IS NULL OR u.active_vehicle_types = '' OR u.active_vehicle_types = '[]') AND d.vehicle_type = ?))
+			AND u.is_online = true 
+			AND u.is_blocked = false
+			AND (6371 * acos(cos(radians(?)) * cos(radians(dl.lat)) * cos(radians(dl.lng) - radians(?)) + sin(radians(?)) * sin(radians(dl.lat)))) <= 5
+		`, searchType, vehicleType, lat, lng, lat).Scan(&drivers).Error
+
+		if err != nil {
+			log.Printf("[Location] haversine query failed, falling back to simple query: %v", err)
+			err = DB.Raw(`
+				SELECT d.*
+				FROM drivers d
+				JOIN driver_locations dl ON d.id = dl.driver_id
+				JOIN users u ON d.user_id = u.id
+				WHERE (u.active_vehicle_types LIKE ? OR ((u.active_vehicle_types IS NULL OR u.active_vehicle_types = '' OR u.active_vehicle_types = '[]') AND d.vehicle_type = ?))
+				AND u.is_online = true
+				AND u.is_blocked = false
+			`, searchType, vehicleType).Scan(&drivers).Error
+		}
+	}
+
+	if err != nil {
+		log.Printf("[Location] nearby driver lookup failed after both queries: %v", err)
+		return nil, err
+	}
+	return drivers, nil
 }
 
 func GetAllOnlineDriverLocations() ([]map[string]interface{}, error) {

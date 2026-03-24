@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"spark/internal/services"
 )
@@ -20,7 +21,8 @@ func UpdateConfig(w http.ResponseWriter, r *http.Request) {
 func GetConfig(w http.ResponseWriter, r *http.Request) {
 	config, err := services.GetApplicableConfig()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		log.Printf("[GetConfig] unable to get config: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	json.NewEncoder(w).Encode(config)

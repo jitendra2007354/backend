@@ -7,11 +7,13 @@ import (
 // Vehicle represents the vehicle model
 type Vehicle struct {
 	ID              uint      `gorm:"primaryKey" json:"id"`
-	UserID          uint      `gorm:"not null" json:"userId"`
-	User            User      `gorm:"foreignKey:UserID" json:"driver,omitempty"`
+	DriverID        uint      `gorm:"not null" json:"driverId"`
+	Driver          Driver    `gorm:"foreignKey:DriverID" json:"driver,omitempty"`
+	UserID          uint      `gorm:"not null" json:"userId"` // Keep if you need a direct link to the user as well
 	VehicleNumber   string    `gorm:"unique;not null" json:"vehicleNumber"`
 	VehicleModel    string    `gorm:"not null" json:"vehicleModel"`
-	VehicleType     string    `gorm:"type:enum('Bike','Auto','Car4Seater','Car6Seater');not null" json:"vehicleType"`
+	VehicleType     string    `gorm:"not null" json:"vehicleType"`
+	RCNumber        string    `gorm:"not null" json:"rcNumber"`
 	RCPhotoURL      string    `gorm:"not null" json:"rcPhotoUrl"`
 	LicensePhotoURL string    `gorm:"not null" json:"licensePhotoUrl"`
 	IsDefault       bool      `gorm:"default:false" json:"isDefault"`

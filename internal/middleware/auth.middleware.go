@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -13,6 +14,14 @@ import (
 	"spark/internal/database"
 	"spark/internal/models"
 )
+
+func getJWTSecret() []byte {
+	jwtSecret := os.Getenv("JWT_SECRET")
+	if jwtSecret == "" {
+		jwtSecret = "default_secret_change_me"
+	}
+	return []byte(jwtSecret)
+}
 
 // UserContextKey is the key for the user value in the request context.
 const UserContextKey = contextKey("user")
@@ -43,10 +52,11 @@ func Protect(next http.Handler) http.Handler {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 			}
-			return []byte(jwtSecret), nil
+			return getJWTSecret(), nil
 		})
 
 		if err != nil || !token.Valid {
+			log.Printf("[JWT] parse failed - token=%s err=%v", tokenString, err)
 			writeJSONError(w, "Not authorized, token failed", http.StatusUnauthorized)
 			return
 		}

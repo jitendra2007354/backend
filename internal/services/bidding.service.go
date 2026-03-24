@@ -2,9 +2,11 @@ package services
 
 import (
 	"errors"
+	"time"
+
+	"spark/internal/models"
 
 	"gorm.io/gorm"
-	"spark/internal/models"
 )
 
 func CreateBid(rideID, userID uint, amount float64, customerID uint) (*models.Bid, error) {
@@ -26,6 +28,11 @@ func CreateBid(rideID, userID uint, amount float64, customerID uint) (*models.Bi
 			return errors.New("ride not available")
 		}
 
+		now := time.Now()
+		if ride.CurrentDriverID != nil && *ride.CurrentDriverID != driver.ID && ride.OfferExpiresAt != nil && ride.OfferExpiresAt.After(now) {
+			return errors.New("ride is currently locked by another driver")
+		}
+
 		// Upsert bid
 		if err := tx.Where("ride_id = ? AND driver_id = ?", rideID, driver.ID).First(&bid).Error; err == nil {
 			bid.Amount = amount
@@ -34,6 +41,12 @@ func CreateBid(rideID, userID uint, amount float64, customerID uint) (*models.Bi
 			bid = models.Bid{RideID: rideID, DriverID: driver.ID, Amount: amount}
 			tx.Create(&bid)
 		}
+
+		// Lock ride to this driver for 5 minutes
+		expiresAt := now.Add(5 * time.Minute)
+		ride.CurrentDriverID = &driver.ID
+		ride.OfferExpiresAt = &expiresAt
+		tx.Save(&ride)
 
 		// Notify customer
 		SendMessageToUser(customerID, "bid-new", map[string]interface{}{
@@ -77,6 +90,7 @@ func AcceptBid(bidID, customerID uint) (map[string]string, error) {
 		ride.Status = "accepted"
 		ride.DriverID = &bid.DriverID
 		ride.Fare = bid.Amount
+		ride.CurrentDriverID = nil
 		tx.Save(&ride)
 
 		ProcessDailyFee(bid.DriverID, tx)
@@ -107,14 +121,20 @@ func DriverAcceptInstant(rideID, userID uint) error {
 			return errors.New("ride not available")
 		}
 
+		now := time.Now()
+		if ride.CurrentDriverID != nil && *ride.CurrentDriverID != driver.ID && ride.OfferExpiresAt != nil && ride.OfferExpiresAt.After(now) {
+			return errors.New("ride is currently locked by another driver")
+		}
+
 		ride.Status = "accepted"
 		ride.DriverID = &driver.ID
+		ride.CurrentDriverID = nil
 		tx.Save(&ride)
 
 		ProcessDailyFee(driver.ID, tx)
 
 		SendMessageToUser(ride.CustomerID, "ride_confirmed", map[string]interface{}{
-			"rideId": ride.ID,
+			"rideId":  ride.ID,
 			"message": "Driver accepted",
 		})
 		SendMessageToAdminRoom("ride_updated", map[string]interface{}{
@@ -168,6 +188,7 @@ func AcceptCounterBid(bidID, driverID uint, amount float64) (*models.Ride, error
 		// Update ride
 		ride.Status = "accepted"
 		ride.DriverID = &driverID
+		ride.CurrentDriverID = nil
 		ride.Fare = amount
 		if err := tx.Save(&ride).Error; err != nil {
 			return err

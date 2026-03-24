@@ -30,8 +30,14 @@ func UploadDocument(userID uint, docType, fileName string, file multipart.File) 
 		driver.DriverLicensePhotoURL = url
 		DB.Save(&driver)
 	case "rc":
-		driver.RCPhotoURL = url
-		DB.Save(&driver)
+		var vehicle models.Vehicle
+		// Find the default vehicle for the driver to update its RC photo.
+		// If no default is found, it will update the first vehicle associated with the driver.
+		if err := DB.Where("driver_id = ?", driver.ID).Order("is_default DESC").First(&vehicle).Error; err != nil {
+			return nil, errors.New("no vehicle found for this driver to update RC photo")
+		}
+		vehicle.RCPhotoURL = url
+		DB.Save(&vehicle)
 	}
 	return map[string]string{"url": url}, nil
 }

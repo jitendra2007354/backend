@@ -14,10 +14,16 @@ func SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		RideID  uint   `json:"rideId"`
 		Message string `json:"message"`
+		Text    string `json:"text"`
 	}
 	json.NewDecoder(r.Body).Decode(&req)
 
-	msg, err := services.SaveChatMessage(req.RideID, user.ID, req.Message)
+	msgText := req.Message
+	if msgText == "" {
+		msgText = req.Text
+	}
+
+	msg, err := services.SaveChatMessage(req.RideID, user.ID, msgText)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -31,4 +37,20 @@ func GetChatMessages(w http.ResponseWriter, r *http.Request) {
 	// Optional: Check if user is part of the ride
 	messages, _ := services.GetChatHistory(uint(rideID))
 	json.NewEncoder(w).Encode(messages)
+}
+
+func GetUserChats(w http.ResponseWriter, r *http.Request) {
+	user, ok := r.Context().Value(middleware.UserContextKey).(*models.User)
+	if !ok || user == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	chats, err := services.GetUserChats(user.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(chats)
 }

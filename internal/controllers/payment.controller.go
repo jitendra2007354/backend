@@ -13,7 +13,10 @@ func MakePayment(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Amount float64 `json:"amount"`
 	}
-	json.NewDecoder(r.Body).Decode(&req)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
 
 	result, err := services.ProcessPayment(user.ID, req.Amount, "fee_payment")
 	if err != nil {
@@ -28,7 +31,10 @@ func ConfirmPayment(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		PaymentIntentID string `json:"paymentIntentId"`
 	}
-	json.NewDecoder(r.Body).Decode(&req)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
 
 	result, err := services.ConfirmPayment(req.PaymentIntentID)
 	if err != nil {

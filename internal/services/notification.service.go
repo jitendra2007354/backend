@@ -75,3 +75,9 @@ func BroadcastSponsorNotification(target, title, message string, notificationID 
 
 	return BroadcastCounts{DriverCount: drivers, CustomerCount: customers}, nil
 }
+
+func GetUserNotifications(userID uint) ([]models.Notification, error) {
+	var notifications []models.Notification
+	err := DB.Where("user_id = ?", userID).Order("created_at DESC").Find(&notifications).Error
+	return notifications, err
+}

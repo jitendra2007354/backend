@@ -9,25 +9,47 @@ import (
 	"strconv"
 )
 
+// writeRideJsonError is a helper to format error responses as JSON.
+func writeRideJsonError(w http.ResponseWriter, message string, statusCode int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	json.NewEncoder(w).Encode(map[string]string{"message": message})
+}
+
 func CreateRide(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		PickupLocation  models.GeoPoint `json:"pickupLocation"`
-		DropoffLocation models.GeoPoint `json:"dropoffLocation"`
-		VehicleType     string          `json:"vehicleType"`
-		Fare            float64         `json:"fare,string"` // Handle string or number input
-		Distance        float64         `json:"distance"`
-		Duration        float64         `json:"duration"`
-	}
+	var req map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid body", http.StatusBadRequest)
+		writeRideJsonError(w, "Invalid body", http.StatusBadRequest)
 		return
+	}
+
+	pickup := parseGeoPointFromMap(req["pickupLocation"])
+	dropoff := parseGeoPointFromMap(req["dropoffLocation"])
+
+	vType, _ := req["vehicleType"].(string)
+
+	fare := 0.0
+	if f, ok := req["fare"].(float64); ok {
+		fare = f
+	} else if fStr, ok := req["fare"].(string); ok {
+		fare, _ = strconv.ParseFloat(fStr, 64)
+	}
+
+	dist := 0.0
+	if d, ok := req["distance"].(float64); ok {
+		dist = d
+	}
+
+	dur := 0.0
+	if d, ok := req["duration"].(float64); ok {
+		dur = d
 	}
 
 	user := r.Context().Value(middleware.UserContextKey).(*models.User)
 
-	ride, err := services.CreateRideService(user.ID, req.PickupLocation, req.DropoffLocation, req.VehicleType, req.Fare, req.Distance, req.Duration)
+	ride, err := services.CreateRideService(user.ID, pickup, dropoff, vType, fare, dist, dur)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeRideJsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	w.WriteHeader(http.StatusCreated)
@@ -37,7 +59,7 @@ func CreateRide(w http.ResponseWriter, r *http.Request) {
 func GetAvailableRides(w http.ResponseWriter, r *http.Request) {
 	rides, err := services.GetPendingRides()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeRideJsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	json.NewEncoder(w).Encode(rides)
@@ -49,7 +71,7 @@ func GetRideByID(w http.ResponseWriter, r *http.Request) {
 
 	ride, err := services.GetRideWithDetails(uint(id))
 	if err != nil {
-		http.Error(w, "Ride not found", http.StatusNotFound)
+		writeRideJsonError(w, "Ride not found", http.StatusNotFound)
 		return
 	}
 	json.NewEncoder(w).Encode(ride)
@@ -62,7 +84,7 @@ func AcceptRide(w http.ResponseWriter, r *http.Request) {
 
 	ride, err := services.GetRideByID(uint(id))
 	if err != nil {
-		http.Error(w, "Ride not found", http.StatusNotFound)
+		writeRideJsonError(w, "Ride not found", http.StatusNotFound)
 		return
 	}
 
@@ -71,12 +93,12 @@ func AcceptRide(w http.ResponseWriter, r *http.Request) {
 	} else if ride.Status == "pending" {
 		err = services.DriverAcceptInstant(uint(id), user.ID)
 	} else {
-		http.Error(w, "Ride not available", http.StatusBadRequest)
+		writeRideJsonError(w, "Ride not available", http.StatusBadRequest)
 		return
 	}
 
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeRideJsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -90,7 +112,7 @@ func RejectRide(w http.ResponseWriter, r *http.Request) {
 	user := r.Context().Value(middleware.UserContextKey).(*models.User)
 
 	if err := services.HandleDriverReject(uint(id), user.ID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeRideJsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
@@ -102,7 +124,7 @@ func CancelRide(w http.ResponseWriter, r *http.Request) {
 	user := r.Context().Value(middleware.UserContextKey).(*models.User)
 
 	if err := services.HandleRideCancellation(uint(id), user.UserType); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeRideJsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
@@ -115,7 +137,7 @@ func ConfirmRide(w http.ResponseWriter, r *http.Request) {
 
 	ride, err := services.ConfirmRideService(uint(id), user.ID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeRideJsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	json.NewEncoder(w).Encode(ride)
@@ -132,7 +154,23 @@ func UpdateRideStatus(w http.ResponseWriter, r *http.Request) {
 
 	ride, err := services.UpdateRideStatusService(uint(id), user.ID, req.Status)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeRideJsonError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	json.NewEncoder(w).Encode(ride)
+}
+
+func GetActiveRide(w http.ResponseWriter, r *http.Request) {
+	user := r.Context().Value(middleware.UserContextKey).(*models.User)
+	ride, err := services.GetDriverActiveRide(user.ID)
+	if err != nil {
+		writeRideJsonError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if ride == nil {
+		// No active ride for this driver
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(nil)
 		return
 	}
 	json.NewEncoder(w).Encode(ride)

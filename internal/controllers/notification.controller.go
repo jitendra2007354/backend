@@ -3,6 +3,8 @@ package controllers
 import (
 	"encoding/json"
 	"net/http"
+	"spark/internal/middleware"
+	"spark/internal/models"
 	"spark/internal/services"
 )
 
@@ -36,4 +38,20 @@ func SendToAllUsers(w http.ResponseWriter, r *http.Request) {
 
 	services.SendAdminNotification("all", req.Title, req.Message)
 	json.NewEncoder(w).Encode(map[string]string{"message": "Sent to all"})
+}
+
+func GetUserNotifications(w http.ResponseWriter, r *http.Request) {
+	user, ok := r.Context().Value(middleware.UserContextKey).(*models.User)
+	if !ok || user == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	notifications, err := services.GetUserNotifications(user.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(notifications)
 }

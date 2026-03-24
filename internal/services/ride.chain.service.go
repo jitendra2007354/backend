@@ -5,8 +5,9 @@ import (
 	"sync"
 	"time"
 
-	"gorm.io/gorm"
 	"spark/internal/models"
+
+	"gorm.io/gorm"
 )
 
 var offerTimers = sync.Map{}
@@ -68,7 +69,7 @@ func HandleDriverReject(rideID, userID uint) error {
 	ride.Status = "pending"
 	ride.CurrentDriverID = nil
 	DB.Save(&ride)
-	
+
 	// Trigger next assignment
 	// FindAndOfferToNextDriver(rideID)
 	return nil
@@ -86,7 +87,7 @@ func HandleRideCancellation(rideID uint, cancelledBy string) error {
 	}
 
 	if cancelledBy == "Driver" {
-		ride.Status = "pending"
+		ride.Status = "cancelled"
 		ride.DriverID = nil
 		DB.Save(&ride)
 		SendMessageToUser(ride.CustomerID, "ride_driver_cancelled", map[string]string{"message": "Driver cancelled"})

@@ -23,11 +23,6 @@ func AdminRoutes() http.Handler {
 	mux.Handle("GET /users", adminAuth(controllers.GetAllUsers))
 	mux.Handle("POST /users", adminAuth(controllers.CreateUser))
 
-	// Pricing
-	mux.Handle("GET /pricing", adminAuth(controllers.GetPricing))
-	mux.Handle("POST /pricing/{type}", adminAuth(controllers.AddPricingRule))
-	mux.Handle("DELETE /pricing/{type}/{id}", adminAuth(controllers.DeletePricingRule))
-
 	// Other Admin Routes
 	mux.Handle("GET /tickets", adminAuth(controllers.GetTickets))
 	mux.Handle("GET /drivers/locations", adminAuth(controllers.GetDriverLocations))

@@ -2,20 +2,31 @@ package services
 
 import (
 	"fmt"
-	"time"
 	"spark/internal/models"
+	"time"
 )
 
 // ScheduleChatCleanup deletes chat messages belonging to rides that
-// were completed or cancelled more than 24 hours ago.
+// were completed or cancelled.
 func ScheduleChatCleanup() {
-	ticker := time.NewTicker(24 * time.Hour)
 	go func() {
-		for range ticker.C {
-			fmt.Println("Running scheduled job: deleting old chat messages...")
-			cutoff := time.Now().Add(-24 * time.Hour)
+		for {
+			now := time.Now()
+			nextMidnight := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
+			duration := nextMidnight.Sub(now)
+			time.Sleep(duration)
+
+			// Try to acquire a lock in Redis for 10 minutes.
+			// Since all servers wake up at exact midnight, the first one to hit Redis wins.
+			if RedisClient != nil {
+				if locked, _ := RedisClient.SetNX(redisCtx, "lock:chat_cleanup", "1", 10*time.Minute).Result(); !locked {
+					continue
+				}
+			}
+
+			fmt.Println("Running scheduled job: deleting completed/cancelled chat messages...")
 			var oldRides []models.Ride
-			if err := DB.Select("id").Where("status IN ? AND updated_at < ?", []string{"completed", "cancelled"}, cutoff).Find(&oldRides).Error; err != nil {
+			if err := DB.Select("id").Where("status IN ?", []string{"completed", "cancelled"}).Find(&oldRides).Error; err != nil {
 				fmt.Println("Chat cleanup fetch error:", err)
 				continue
 			}
@@ -29,34 +40,6 @@ func ScheduleChatCleanup() {
 			}
 			res := DB.Where("ride_id IN ?", rideIds).Delete(&models.ChatMessage{})
 			fmt.Printf("Deleted %d chat messages from %d rides\n", res.RowsAffected, len(rideIds))
-		}
-	}()
-}
-
-// ScheduleDriverStatusChecks blocks drivers who haven't paid their outstanding
-// fee within 24 hours of it being charged.
-func ScheduleDriverStatusChecks() {
-	ticker := time.NewTicker(1 * time.Hour)
-	go func() {
-		for range ticker.C {
-			fmt.Println("Running scheduled job: checking for drivers with outstanding balances...")
-			paymentDeadline := time.Now().Add(-24 * time.Hour)
-			var drivers []models.Driver
-			if err := DB.Preload("User").Where("outstanding_platform_fee > ?", 0).Find(&drivers).Error; err != nil {
-				fmt.Println("Driver status check query error:", err)
-				continue
-			}
-			for _, drv := range drivers {
-				if drv.User.IsBlocked {
-					continue
-				}
-				if drv.LastDailyFeeChargedAt != nil && drv.LastDailyFeeChargedAt.Before(paymentDeadline) {
-					// block the associated user
-					DB.Model(&models.User{}).Where("id = ?", drv.UserID).Update("is_blocked", true)
-					fmt.Printf("Auto-blocked driver %d (user %d) for non-payment\n", drv.ID, drv.UserID)
-					SendMessageToUser(drv.UserID, "account_blocked", map[string]interface{}{"reason": "Payment overdue: Daily access fee not paid within 24 hours."})
-				}
-			}
 		}
 	}()
 }

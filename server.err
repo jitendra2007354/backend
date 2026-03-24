@@ -1,0 +1,6 @@
+2026/03/14 19:46:15 ✅ Loaded .env file
+2026/03/14 19:46:16 ✅ Database connection established
+2026/03/14 19:46:16 🔄 Running database migrations...
+2026/03/14 19:47:03 ✅ Database migrations completed
+2026/03/14 19:47:04 Server starting on port 4000
+2026/03/14 19:48:05 [Location] spatial query unsupported, falling back to simple query: Error 1305 (42000): FUNCTION test.point does not exist

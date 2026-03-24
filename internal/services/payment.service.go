@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"time"
 	"spark/internal/models"
+	"time"
 
 	"github.com/stripe/stripe-go/v76"
 	"github.com/stripe/stripe-go/v76/paymentintent"
@@ -117,14 +117,18 @@ func FulfillPayment(userID uint, amount float64, purpose string, referenceID str
 			if err := tx.Where("user_id = ?", userID).First(&driver).Error; err != nil {
 				return errors.New("driver not found")
 			}
-			
+
 			// Reduce outstanding fee, ensure it doesn't go below 0 (logic simplified)
 			newBalance := math.Max(0, driver.OutstandingPlatformFee-amount)
-			if err := tx.Model(&driver).Update("outstanding_platform_fee", newBalance).Error; err != nil {
+
+			updates := map[string]interface{}{
+				"outstanding_platform_fee": newBalance,
+			}
+			if err := tx.Model(&driver).Updates(updates).Error; err != nil {
 				return err
 			}
-
-			if newBalance == 0 {
+			if newBalance <= 0 {
+				tx.Model(&driver).Update("platform_access_expiry", gorm.Expr("NULL"))
 				tx.Model(&models.User{}).Where("id = ?", userID).Update("is_blocked", false)
 			}
 		}
@@ -138,7 +142,7 @@ func FulfillPayment(userID uint, amount float64, purpose string, referenceID str
 	return &PaymentResult{Success: true, Message: "Payment processed successfully"}, nil
 }
 
-// ProcessDailyFee charges a fixed daily fee if 24h have passed since last charge.
+// ProcessDailyFee charges a fixed daily fee if 24 hours have passed since last charge.
 func ProcessDailyFee(driverID uint, tx *gorm.DB) {
 	var driver models.Driver
 	if err := tx.First(&driver, driverID).Error; err != nil {
@@ -146,13 +150,25 @@ func ProcessDailyFee(driverID uint, tx *gorm.DB) {
 	}
 
 	now := time.Now()
-	if driver.LastDailyFeeChargedAt == nil || now.Sub(*driver.LastDailyFeeChargedAt) > 24*time.Hour {
-		dailyFee := 50.0
-		// update fields
-		driver.OutstandingPlatformFee += dailyFee
-		driver.LastDailyFeeChargedAt = &now
-		expiry := now.Add(24 * time.Hour)
-		driver.PlatformAccessExpiry = &expiry
-		tx.Save(&driver)
+	// Only apply a new fee and start a new timer if they have cleared their previous dues.
+	// This prevents the timer from restarting if it expires while they are mid-ride.
+	if driver.OutstandingPlatformFee <= 0 {
+		if driver.LastDailyFeeChargedAt == nil || now.Sub(*driver.LastDailyFeeChargedAt) > 1*time.Minute {
+			dailyFee := 50.0
+
+			// Dynamically fetch platform_fee using SQL select to cleanly auto-convert numeric types
+			var dbFee float64
+			if err := tx.Table("configs").Select("platform_fee").Where("`key` = ?", "global").Scan(&dbFee).Error; err == nil && dbFee > 0 {
+				dailyFee = dbFee
+			}
+			// update fields
+			driver.OutstandingPlatformFee += dailyFee
+			driver.LastDailyFeeChargedAt = &now
+
+			// Set expiry to 1 minute
+			expiry := now.Add(1 * time.Minute)
+			driver.PlatformAccessExpiry = &expiry
+			tx.Save(&driver)
+		}
 	}
 }
