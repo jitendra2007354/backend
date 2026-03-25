@@ -38,6 +38,11 @@ func Login(w http.ResponseWriter, r *http.Request) {
 		saveFile := func(field string) string {
 			file, header, err := r.FormFile(field)
 			if err != nil {
+				// Fallback: If it's not a file, check if it's a direct URL string (e.g., from Google Sign-In)
+				val := r.FormValue(field)
+				if val != "" {
+					return val
+				}
 				return ""
 			}
 			defer file.Close()
@@ -67,6 +72,7 @@ func Login(w http.ResponseWriter, r *http.Request) {
 			"vehicleType":           get("vehicleType"),
 			"vehicleModel":          get("vehicleModel"),
 			"vehicleNumber":         get("vehicleNumber"),
+			"rcNumber":              get("rcNumber"),
 			"driverLicenseNumber":   get("driverLicenseNumber"),
 			"pfpUrl":                saveFile("pfp"),
 			"driverLicensePhotoUrl": saveFile("driverLicensePhoto"),
@@ -100,10 +106,22 @@ func Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userMap := map[string]interface{}{}
+	userBytes, _ := json.Marshal(result.User)
+	json.Unmarshal(userBytes, &userMap)
+
+	if result.User != nil && result.User.UserType == "Driver" {
+		if vehicles, err := services.ListDriverVehicles(result.User.ID); err == nil {
+			userMap["vehicles"] = vehicles
+		} else {
+			userMap["vehicles"] = []interface{}{}
+		}
+	}
+
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"message": "Login successful",
 		"token":   result.Token,
-		"user":    result.User,
+		"user":    userMap,
 	})
 }
 
@@ -122,8 +140,25 @@ func AdminLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func Me(w http.ResponseWriter, r *http.Request) {
-	user := r.Context().Value(middleware.UserContextKey)
-	json.NewEncoder(w).Encode(user)
+	user, ok := r.Context().Value(middleware.UserContextKey).(*models.User)
+	if !ok || user == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	userMap := map[string]interface{}{}
+	userBytes, _ := json.Marshal(user)
+	json.Unmarshal(userBytes, &userMap)
+
+	if user.UserType == "Driver" {
+		if vehicles, err := services.ListDriverVehicles(user.ID); err == nil {
+			userMap["vehicles"] = vehicles
+		} else {
+			userMap["vehicles"] = []interface{}{}
+		}
+	}
+
+	json.NewEncoder(w).Encode(userMap)
 }
 
 func UpdateProfile(w http.ResponseWriter, r *http.Request) {
