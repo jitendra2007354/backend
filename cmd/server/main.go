@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"log"
 	"net/http"
 	"os"
@@ -69,6 +70,9 @@ func (m *methodMux) HandleFunc(pattern string, handler func(http.ResponseWriter,
 }
 
 func main() {
+	migrateFlag := flag.Bool("migrate", false, "Run database auto-migration and exit")
+	flag.Parse()
+
 	// Load environment variables from .env file
 	if err := godotenv.Load(); err != nil {
 		log.Println("Warning: No .env file found. Relying on system environment variables.")
@@ -86,6 +90,34 @@ func main() {
 
 	// Inject DB connection into services
 	services.DB = database.DB
+
+	// Run Auto Migration only if the -migrate flag is provided
+	if *migrateFlag {
+		log.Println("Running database auto-migration...")
+		err := services.DB.AutoMigrate(
+			&models.User{},
+			&models.Driver{},
+			&models.Vehicle{},
+			&models.Ride{},
+			&models.Bid{},
+			&models.DriverLocation{},
+			&models.Config{},
+			&models.Sponsor{},
+			&models.SponsorNotification{},
+			&models.ChatMessage{},
+			&models.SupportTicket{},
+			&models.Transaction{},
+			&models.Rating{},
+			&models.PricingRule{},
+			&models.Notification{},
+			&models.NotificationForSponsor{},
+		)
+		if err != nil {
+			log.Fatalf("Database AutoMigrate failed: %v", err)
+		}
+		log.Println("✅ Database AutoMigrate completed successfully.")
+		os.Exit(0) // Exit after migrating so the server doesn't start
+	}
 
 	// Initialize Redis
 	services.InitRedis()

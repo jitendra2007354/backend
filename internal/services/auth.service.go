@@ -79,14 +79,18 @@ func LoginOrRegister(data map[string]interface{}) (*LoginResult, error) {
 		fmt.Printf("Key: %s, Value: %v, Type: %T\n", key, value, value)
 	}
 
+	action := getStr(data, "action")
+	phoneNumber := getStr(data, "phoneNumber")
+
+	if phoneNumber == "" {
+		return nil, errors.New("phone number is required")
+	}
+
 	firstName := getStr(data, "firstName")
 	lastName := getStr(data, "lastName")
 
-	phoneNumber := getStr(data, "phoneNumber")
-	// Optional fields are handled below via getStrPtr
-
-	if phoneNumber == "" || firstName == "" || lastName == "" {
-		return nil, errors.New("phone number, first name, and last name are required")
+	if action != "login" && (firstName == "" || lastName == "") {
+		return nil, errors.New("first name and last name are required")
 	}
 
 	driverLicenseNumber := getStr(data, "driverLicenseNumber")
@@ -99,7 +103,7 @@ func LoginOrRegister(data map[string]interface{}) (*LoginResult, error) {
 		fmt.Printf("DEBUG: vehicle information vehicleModel: %s, vehicleNumber: %s, vehicleType: %s, rcNumber: %s\n", vehicleModel, vehicleNumber, vehicleType, rcNumber)
 	}
 
-	isDriver := driverLicenseNumber != ""
+	isDriver := driverLicenseNumber != "" || getStr(data, "userType") == "Driver"
 	userType := "Customer"
 	if isDriver {
 		userType = "Driver"
@@ -112,6 +116,25 @@ func LoginOrRegister(data map[string]interface{}) (*LoginResult, error) {
 		// Find existing user strictly by phone number.
 		// Using OR email causes different phone numbers to merge into the same account during testing!
 		result := tx.Where("phone_number = ?", phoneNumber).First(&user)
+
+		if action == "login" {
+			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+				return errors.New("account not found, please sign up")
+			} else if result.Error != nil {
+				return result.Error
+			}
+			if isDriver && user.UserType != "Driver" {
+				return errors.New("account not registered as a partner")
+			}
+
+			// Refresh session
+			sessionID, err := generateSessionID()
+			if err == nil {
+				sessionStore.Store(user.ID, SessionData{UserID: user.ID, SessionID: sessionID, LoginTime: time.Now()})
+			}
+			return nil
+		}
+
 		isNewUser := false
 		if result.Error == nil {
 			// Existing user found, refresh session
@@ -325,14 +348,16 @@ func CustomerLoginService(data map[string]interface{}) (*LoginResult, error) {
 	// --- 1. Safely extract and validate required data ---
 	fmt.Printf("Raw Data received in CustomerLoginService: %+v\n", data)
 
+	action := getStr(data, "action")
 	phoneNumber := getStr(data, "phoneNumber")
 	firstName := getStr(data, "firstName")
 	lastName := getStr(data, "lastName")
 
-	// Optional fields are handled using getStrPtr to avoid storing empty strings in unique fields.
-
-	if phoneNumber == "" || firstName == "" || lastName == "" {
-		return nil, errors.New("phone number, first name, and last name are required")
+	if phoneNumber == "" {
+		return nil, errors.New("phone number is required")
+	}
+	if action != "login" && (firstName == "" || lastName == "") {
+		return nil, errors.New("first name and last name are required")
 	}
 
 	// --- 2. Perform database operations in a transaction ---
@@ -341,6 +366,15 @@ func CustomerLoginService(data map[string]interface{}) (*LoginResult, error) {
 
 		// Find existing user strictly by phone number
 		result := tx.Where("phone_number = ?", phoneNumber).First(&user)
+
+		if action == "login" {
+			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+				return errors.New("account not found, please sign up")
+			} else if result.Error != nil {
+				return result.Error
+			}
+			return nil
+		}
 
 		if result.Error != nil {
 			// Check if the error is because the record wasn't found

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"spark/internal/models"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -57,30 +56,4 @@ func Connect() {
 	}
 
 	log.Println("✅ Database connection established")
-
-	// AutoMigrate tables
-	log.Println("🔄 Running database migrations...")
-	err = DB.AutoMigrate(
-		&models.User{},
-		&models.Driver{},
-		&models.Vehicle{},
-		&models.Ride{},
-		&models.Bid{},
-		&models.DriverLocation{},
-		&models.Config{},
-		&models.Sponsor{},
-		&models.SponsorNotification{},
-		&models.ChatMessage{},
-		&models.SupportTicket{},
-		&models.Transaction{},
-		&models.Rating{},
-		&models.PricingRule{},
-		&models.Notification{},
-		&models.NotificationForSponsor{},
-	)
-	if err != nil {
-		log.Printf("⚠️ Migration warning: %v", err)
-	} else {
-		log.Println("✅ Database migrations completed")
-	}
 }

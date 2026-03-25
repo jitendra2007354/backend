@@ -9,6 +9,13 @@ import (
 	"strings"
 )
 
+// writeAuthJsonError is a helper to format error responses as JSON.
+func writeAuthJsonError(w http.ResponseWriter, message string, statusCode int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	json.NewEncoder(w).Encode(map[string]string{"message": message})
+}
+
 func Login(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -17,13 +24,13 @@ func Login(w http.ResponseWriter, r *http.Request) {
 	contentType := r.Header.Get("Content-Type")
 	if strings.HasPrefix(contentType, "application/json") {
 		if err := json.NewDecoder(r.Body).Decode(&loginData); err != nil {
-			http.Error(w, "Invalid JSON body: "+err.Error(), http.StatusBadRequest)
+			writeAuthJsonError(w, "Invalid JSON body: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 	} else {
 		// Handle form-data fallback for file uploads and legacy clients
 		if err := r.ParseMultipartForm(10 << 20); err != nil {
-			http.Error(w, "Failed to parse form: "+err.Error(), http.StatusBadRequest)
+			writeAuthJsonError(w, "Failed to parse form: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 
@@ -64,22 +71,32 @@ func Login(w http.ResponseWriter, r *http.Request) {
 			"pfpUrl":                saveFile("pfp"),
 			"driverLicensePhotoUrl": saveFile("driverLicensePhoto"),
 			"rcPhotoUrl":            saveFile("rcPhoto"),
+			"userType":              get("userType"),
+			"action":                get("action"),
 		}
 	}
 
 	var result *services.LoginResult
 	var err error
 
-	// If driver details are present, keep the user type as Driver.
-	if dl, ok := loginData["driverLicenseNumber"].(string); ok && dl != "" {
-		result, err = services.DriverLoginService(loginData)
-	} else if vn, ok := loginData["vehicleNumber"].(string); ok && vn != "" {
+	// Route to Driver login if explicitly requested, or if typical driver fields are present
+	userType, _ := loginData["userType"].(string)
+	dl, _ := loginData["driverLicenseNumber"].(string)
+	vn, _ := loginData["vehicleNumber"].(string)
+
+	if userType == "Driver" || dl != "" || vn != "" {
 		result, err = services.DriverLoginService(loginData)
 	} else {
 		result, err = services.CustomerLoginService(loginData)
 	}
+
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		status := http.StatusInternalServerError
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "not found") || strings.Contains(errMsg, "registered") || strings.Contains(errMsg, "required") {
+			status = http.StatusUnauthorized
+		}
+		writeAuthJsonError(w, errMsg, status)
 		return
 	}
 
